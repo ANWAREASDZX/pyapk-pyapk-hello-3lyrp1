@@ -1,0 +1,16 @@
+.buildozer/
+bin/
+packages/
+*.apk
+*.aab
+*.keystore
+*.log
+__pycache__/
+*.pyc
+*.pyo
+.env
+.venv/
+venv/
+dist/
+build/
+*.egg-info/

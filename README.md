@@ -1,2 +1,33 @@
-# pyapk-pyapk-hello-3lyrp1
-Built with PyAPK Builder — Python to APK via GitHub Actions
+# PyAPK Hello
+
+تطبيق أندرويد تم إنشاؤه عبر **PyAPK Builder** باستخدام GitHub Actions و buildozer.
+
+## التفاصيل
+- **اسم التطبيق:** PyAPK Hello
+- **اسم الحزمة:** com.anwar.helloapp
+- **الإصدار:** 1.0.0
+- **الاتجاه:** portrait
+- **وضع البناء:** debug
+- **المتطلبات:** python3,kivy
+- **الصلاحيات:** INTERNET
+- **المعمارية:** arm64-v8a (Android 5.0+)
+
+## البناء
+يتم البناء تلقائياً عند الدفع (push) إلى المستودع عبر GitHub Actions.
+
+```bash
+buildozer android debug
+```
+
+ملف الـ APK سيكون في مجلد `bin/`.
+
+## التثبيت على الجهاز
+1. فعّل "تثبيت من مصادر غير معروفة" في إعدادات أندرويد
+2. انقل ملف الـ APK إلى جهازك
+3. افتح ملف الـ APK للتثبيت
+
+## استكشاف الأخطاء
+إذا تعطل التطبيق بعد التثبيت:
+- تأكد من أن جهازك يدعم معماريات arm64-v8a (معظم الأجهزة الحديثة تدعمها)
+- راجع سجل logcat: `adb logcat -s python`
+- تأكد من أن إصدار أندرويد 5.0 أو أحدث

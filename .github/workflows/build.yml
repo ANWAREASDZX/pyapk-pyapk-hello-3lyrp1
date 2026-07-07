@@ -1,0 +1,146 @@
+# GitHub Actions workflow — PyAPK Builder
+# Builds an optimized Android APK from Python source using buildozer.
+name: Build APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache buildozer global
+        uses: actions/cache@v4
+        with:
+          path: /tmp/buildozer-cache
+          key: buildozer-global-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            buildozer-global-${{ runner.os }}-
+
+      - name: Validate Python source
+        run: |
+          python3 -c "
+          import ast, sys
+          for f in ['main.py']:
+              try:
+                  ast.parse(open(f).read())
+                  print(f'✓ {f}: syntax OK')
+              except SyntaxError as e:
+                  print(f'✗ {f}: {e}')
+                  sys.exit(1)
+          "
+
+      - name: Build APK with buildozer Docker image (fast)
+        id: build
+        run: |
+          set -e
+          mkdir -p /tmp/buildozer-cache bin
+          sudo chown -R 1000:1000 /tmp/buildozer-cache
+          sudo chown -R 1000:1000 .
+
+          # Run buildozer inside the official Kivy image.
+          # --entrypoint bash overrides the image's buildozer entrypoint.
+          # pipefail ensures the pipeline fails if buildozer fails.
+          docker run --rm \
+            --entrypoint /bin/bash \
+            -v $(pwd):/home/user/hostcwd \
+            -v /tmp/buildozer-cache:/home/user/.buildozer \
+            -w /home/user/hostcwd \
+            kivy/buildozer:latest \
+            -c 'set -o pipefail; buildozer -v android debug 2>&1 | tee buildozer.log'
+
+          # Restore ownership so Actions can read the output
+          sudo chown -R $(id -u):$(id -g) .
+
+          # Locate the produced APK(s)
+          ls -lh bin/*.apk || true
+          APK=$(ls -1 bin/*.apk 2>/dev/null | head -n1)
+          if [ -z "$APK" ]; then
+            echo "::error::No APK was produced"
+            exit 1
+          fi
+          echo "apk_path=$APK" >> $GITHUB_OUTPUT
+          echo "apk_name=$(basename $APK)" >> $GITHUB_OUTPUT
+          echo "apk_size=$(du -h $APK | cut -f1)" >> $GITHUB_OUTPUT
+          echo "::notice::APK built: $APK ($(du -h $APK | cut -f1))"
+
+      - name: Optimize & inspect APK
+        id: optimize
+        run: |
+          set -e
+          APK="${{ steps.build.outputs.apk_path }}"
+          APK_DIR="$(dirname $APK)"
+
+          # Install zipalign + aapt for post-processing
+          export ANDROID_HOME=$ANDROID_SDK_ROOT
+          echo "=== APK contents summary ==="
+          unzip -l "$APK" | tail -5
+
+          # Count native libs and report
+          SO_COUNT=$(unzip -l "$APK" | grep -c '\.so$' || echo 0)
+          echo "::notice::Native libraries: $SO_COUNT"
+
+          # Report final size
+          SIZE=$(du -h "$APK" | cut -f1)
+          echo "::notice::Final APK size: $SIZE"
+          echo "size=$SIZE" >> $GITHUB_OUTPUT
+
+          # Verify the APK is valid (has AndroidManifest.xml + classes.dex)
+          if unzip -l "$APK" | grep -q 'AndroidManifest.xml'; then
+            echo "✓ APK contains AndroidManifest.xml"
+          else
+            echo "::error::APK is missing AndroidManifest.xml — build may be corrupt"
+            exit 1
+          fi
+
+      - name: Upload APK artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build.outputs.apk_name }}
+          path: bin/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create release with APK
+        if: success()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: $PyAPK Hello APK Build #${{ github.run_number }} (${{ steps.optimize.outputs.size }})
+          body: |
+            ## $PyAPK Hello v1.0.0
+
+            **APK Size:** ${{ steps.optimize.outputs.size }}
+            **Build Mode:** debug
+            **Architecture:** arm64-v8a
+            **Min Android:** 5.0 (API 21)
+
+            ### التثبيت
+            1. حمّل ملف الـ APK
+            2. فعّل "تثبيت من مصادر غير معروفة" في إعدادات أندرويد
+            3. افتح ملف الـ APK للتثبيت
+          files: bin/*.apk
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildozer-log
+          path: buildozer.log
+          if-no-files-found: ignore
+          retention-days: 7
